@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northstar Eval Platform</title>
+<style>
+  :root { --ink:#1c1a17; --muted:#6b6560; --line:#e3ded6; --paper:#faf9f6; --pine:#1d5c3f; --amber:#8a5a00; --red:#9b2c2c; --green:#1d5c3f; }
+  * { box-sizing:border-box; }
+  body { font-family:system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:var(--paper); margin:0; padding:0 20px 60px; max-width:980px; margin-left:auto; margin-right:auto; }
+  h1 { font-size:1.5rem; margin:28px 0 4px; }
+  h2 { font-size:1.1rem; margin:28px 0 10px; border-bottom:1px solid var(--line); padding-bottom:6px; }
+  p.sub { color:var(--muted); margin:0 0 18px; }
+  section { margin-top:8px; }
+  label { display:block; font-size:.85rem; color:var(--muted); margin:10px 0 4px; }
+  input[type=text], input[type=number], select, textarea { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
+  textarea { min-height:64px; }
+  button { background:var(--pine); color:#fff; border:0; border-radius:6px; padding:9px 16px; font:inherit; cursor:pointer; margin-top:12px; }
+  button.secondary { background:#fff; color:var(--ink); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; margin-top:10px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:999px; font-size:.75rem; }
+  .pass { background:#e2f0e6; color:var(--green); }
+  .fail { background:#fbe4e4; color:var(--red); }
+  .flag { background:#fdf1d7; color:var(--amber); }
+  .muted { color:var(--muted); font-size:.85rem; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-top:12px; background:#fff; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .error { color:var(--red); margin-top:10px; }
+  .ok { color:var(--green); margin-top:10px; }
+  details { margin-top:8px; }
+  summary { cursor:pointer; color:var(--pine); }
+  pre { background:#f3f1ec; padding:10px; border-radius:6px; overflow:auto; font-size:.82rem; }
+  .metric { font-size:.85rem; }
+  .metric b { display:inline-block; min-width:170px; }
+</style>
+</head>
+<body>
+<h1>Northstar Eval Platform</h1>
+<p class="sub">Measure whether the support assistant is reliable, accurate and safe — and catch regressions before release. Scores are deterministic rubric checks, not a judge model; flagged results go to a human reviewer.</p>
+
+<section>
+  <h2>1. Upload a dataset and its knowledge base</h2>
+  <p class="muted">A .jsonl or .csv file. Each example needs an id, a question, a reference answer, source document ids and an expected behaviour.</p>
+  <input type="file" id="datasetFile" accept=".jsonl,.csv">
+  <button id="uploadBtn">Upload and validate</button>
+  <div id="uploadMsg"></div>
+  <p class="muted">Then upload the knowledge base the assistant answers from — a <code>knowledge_base.json</code> file with one entry per source document (id, title, text). Every citation is checked against these documents, so an evaluation cannot run until the knowledge base is here.</p>
+  <input type="file" id="kbFile" accept=".json">
+  <button id="kbBtn">Upload knowledge base</button>
+  <div id="kbMsg"></div>
+  <div id="datasetList"></div>
+</section>
+
+<section>
+  <h2>2. Start an evaluation</h2>
+  <div class="row">
+    <div>
+      <label for="runDataset">Dataset</label>
+      <select id="runDataset"></select>
+    </div>
+    <div>
+      <label for="runProvider">Provider</label>
+      <select id="runProvider">
+        <option value="mock-a">mock-a — careful assistant (offline demo)</option>
+        <option value="mock-b">mock-b — sloppy assistant (offline demo)</option>
+        <option value="openai">openai — OpenAI-compatible API (needs NORTHSTAR_LLM_API_KEY)</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label for="runModel">Model name</label>
+      <input type="text" id="runModel" placeholder="e.g. mock-a">
+    </div>
+    <div>
+      <label for="runPrompt">Prompt version</label>
+      <select id="runPrompt"><option value="v2">v2 — cite every claim</option><option value="v1">v1 — concise answer</option></select>
+    </div>
+  </div>
+  <label for="runName">Run name (optional)</label>
+  <input type="text" id="runName" placeholder="e.g. mock-a baseline, 25 Nov 2026">
+  <button id="runBtn">Start evaluation</button>
+  <div id="runMsg"></div>
+</section>
+
+<section>
+  <h2>3. Runs</h2>
+  <div id="runsList"></div>
+  <div id="runDetail"></div>
+</section>
+
+<section>
+  <h2>4. Compare two runs</h2>
+  <div class="row">
+    <div><label for="cmpA">Baseline (A)</label><select id="cmpA"></select></div>
+    <div><label for="cmpB">New version (B)</label><select id="cmpB"></select></div>
+  </div>
+  <button id="cmpBtn">Compare</button>
+  <div id="cmpResult"></div>
+</section>
+
+<section>
+  <h2>5. Human review queue</h2>
+  <p class="muted">Results the scorer flagged — borderline scores, sharply disagreeing metrics, or a low metric. A reviewer records agree or disagree with a corrected score and a note.</p>
+  <label for="reviewRun">Run</label>
+  <select id="reviewRun"></select>
+  <button id="queueBtn" class="secondary">Show queue</button>
+  <div id="queueList"></div>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { detail: text }; }
+  if (!res.ok) throw new Error(data.detail || ("Request failed: " + res.status));
+  return data;
+}
+
+async function refreshDatasets() {
+  const { datasets } = await api("/api/datasets");
+  const opts = datasets.map(d => `<option value="${esc(d.path)}">${esc(d.filename)} (${d.total} items)</option>`).join("");
+  $("runDataset").innerHTML = opts || "<option value=''>No datasets uploaded yet</option>";
+  $("datasetList").innerHTML = datasets.length
+    ? "<table><tr><th>Dataset</th><th>Items</th><th>Categories</th></tr>" + datasets.map(d =>
+        `<tr><td>${esc(d.filename)}</td><td>${d.total}</td><td>${esc(Object.entries(d.by_category).map(([k,v]) => k + " " + v).join(", "))}</td></tr>`).join("") + "</table>"
+    : "<p class='muted'>No datasets uploaded yet.</p>";
+}
+
+async function refreshRuns() {
+  const { runs } = await api("/api/runs");
+  const sel = runs.map(r => `<option value="${r.id}">${esc(r.name)} — mean ${r.mean_score.toFixed(2)}</option>`).join("");
+  $("cmpA").innerHTML = sel; $("cmpB").innerHTML = sel; $("reviewRun").innerHTML = sel;
+  $("runsList").innerHTML = runs.length
+    ? "<table><tr><th>Run</th><th>Provider / model</th><th>Prompt</th><th>Mean</th><th>Pass rate</th><th></th></tr>" + runs.map(r =>
+        `<tr><td>${esc(r.name)}<br><span class='muted'>${esc(r.created_at)}</span></td><td>${esc(r.provider)} / ${esc(r.model)}</td><td>${esc(r.prompt_version)}</td><td>${r.mean_score.toFixed(2)}</td><td>${(r.pass_rate*100).toFixed(0)}%</td><td><button class='secondary' data-run='${r.id}'>Inspect</button> <a href='/api/runs/${r.id}/report?format=md' target='_blank'>Report (md)</a> · <a href='/api/runs/${r.id}/report?format=json' target='_blank'>JSON</a></td></tr>`).join("") + "</table>"
+    : "<p class='muted'>No runs yet. Upload a dataset and start an evaluation above.</p>";
+  document.querySelectorAll("[data-run]").forEach(btn => btn.addEventListener("click", () => showRun(btn.dataset.run)));
+}
+
+function metricRows(metrics) {
+  return Object.entries(metrics).map(([name, m]) =>
+    `<div class='metric'><b>${esc(name)}</b> ${m.score} — ${esc(m.rationale)}</div>`).join("");
+}
+
+async function showRun(runId) {
+  const { run, results, review_stats } = await api("/api/runs/" + runId);
+  $("runDetail").innerHTML = `<div class='card'><h3 style='margin-top:0'>${esc(run.name)}</h3>
+    <p class='muted'>${esc(run.provider)} / ${esc(run.model)} · prompt ${esc(run.prompt_version)} · ${run.n_items} items · mean ${run.mean_score.toFixed(2)} · pass rate ${(run.pass_rate*100).toFixed(1)}% · dataset ${esc(run.dataset_name)} (${esc(run.dataset_hash.slice(0,12))}…)</p>
+    <p class='muted'>Review: ${review_stats.flagged_reviewed} of ${review_stats.flagged} flagged reviewed (coverage ${(review_stats.coverage*100).toFixed(0)}%), ${review_stats.overturned} overturned.</p>
+    <table><tr><th>Item</th><th>Category</th><th>Mean</th><th>Status</th><th>Response</th></tr>` +
+    results.map(r => `<tr><td>${esc(r.item_id)}</td><td>${esc(r.category)}</td><td>${r.mean_score.toFixed(2)}</td>
+      <td>${r.passed ? "<span class='badge pass'>pass</span>" : "<span class='badge fail'>fail</span>"} ${r.needs_review ? "<span class='badge flag'>review</span>" : ""}</td>
+      <td>${esc(r.response)}<details><summary>Scores</summary>${metricRows(r.metrics)}${r.flag_reasons.length ? "<p class='muted'>Flags: " + esc(r.flag_reasons.join("; ")) + "</p>" : ""}${r.review ? "<p class='muted'>Review: " + esc(r.review.judgement) + " by " + esc(r.review.reviewer) + "</p>" : ""}</details></td></tr>`).join("") +
+    "</table></div>";
+  $("runDetail").scrollIntoView({ behavior: "smooth" });
+}
+
+$("kbBtn").addEventListener("click", async () => {
+  const file = $("kbFile").files[0];
+  if (!file) { $("kbMsg").innerHTML = "<p class='error'>Choose a knowledge_base.json file first.</p>"; return; }
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const data = await api("/api/knowledge-base/upload", { method: "POST", body: form });
+    $("kbMsg").innerHTML = `<p class='ok'>Knowledge base uploaded: ${data.documents} documents (${esc(data.doc_ids.join(", "))}).</p>`;
+    await refreshDatasets();
+  } catch (e) { $("kbMsg").innerHTML = `<p class='error'>${esc(e.message)}</p>`; }
+});
+
+$("uploadBtn").addEventListener("click", async () => {
+  const file = $("datasetFile").files[0];
+  if (!file) { $("uploadMsg").innerHTML = "<p class='error'>Choose a .jsonl or .csv file first.</p>"; return; }
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const data = await api("/api/datasets/upload", { method: "POST", body: form });
+    $("uploadMsg").innerHTML = `<p class='ok'>Uploaded ${esc(data.filename)}: ${data.total} examples, knowledge base has ${data.knowledge_base_docs} documents. Dataset hash ${esc(data.hash.slice(0,12))}…</p>`;
+    await refreshDatasets();
+  } catch (e) { $("uploadMsg").innerHTML = `<p class='error'>${esc(e.message)}</p>`; }
+});
+
+$("runBtn").addEventListener("click", async () => {
+  const body = {
+    dataset: $("runDataset").value,
+    provider: $("runProvider").value,
+    model: $("runModel").value || $("runProvider").value,
+    prompt_version: $("runPrompt").value,
+    name: $("runName").value,
+  };
+  if (!body.dataset) { $("runMsg").innerHTML = "<p class='error'>Upload a dataset first.</p>"; return; }
+  $("runBtn").disabled = true;
+  $("runMsg").innerHTML = "<p class='muted'>Running evaluation…</p>";
+  try {
+    const data = await api("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    $("runMsg").innerHTML = `<p class='ok'>Run complete: mean ${data.mean_score.toFixed(2)}, pass rate ${(data.pass_rate*100).toFixed(1)}%, ${data.flagged} flagged for review. Run id: ${esc(data.run_id)}</p>`;
+    await refreshRuns();
+    await showRun(data.run_id);
+  } catch (e) { $("runMsg").innerHTML = `<p class='error'>${esc(e.message)}</p>`; }
+  $("runBtn").disabled = false;
+});
+
+$("cmpBtn").addEventListener("click", async () => {
+  const a = $("cmpA").value, b = $("cmpB").value;
+  if (!a || !b) { $("cmpResult").innerHTML = "<p class='error'>Two runs are needed to compare.</p>"; return; }
+  try {
+    const c = await api("/api/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run_a: a, run_b: b }) });
+    const rows = Object.entries(c.by_category).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v.mean_a.toFixed(2)}</td><td>${v.mean_b.toFixed(2)}</td><td>${v.delta >= 0 ? "+" : ""}${v.delta.toFixed(2)}</td></tr>`).join("");
+    const items = (list, label) => list.length ? `<h4>${label} (${list.length})</h4><ul>` + list.map(d => `<li><b>${esc(d.item_id)}</b> ${d.mean_a.toFixed(2)} → ${d.mean_b.toFixed(2)} — ${esc(d.question)}<br><span class='muted'>Before: ${esc(d.response_a)}</span><br><span class='muted'>After: ${esc(d.response_b)}</span></li>`).join("") + "</ul>" : "";
+    $("cmpResult").innerHTML = `<div class='card'><p><b>${esc(c.run_a.name)} → ${esc(c.run_b.name)}</b>: mean ${c.mean_a.toFixed(2)} → ${c.mean_b.toFixed(2)} (Δ ${c.overall_delta >= 0 ? "+" : ""}${c.overall_delta.toFixed(2)}), pass rate ${(c.pass_rate_a*100).toFixed(0)}% → ${(c.pass_rate_b*100).toFixed(0)}%.</p>
+      <p>Improved: <b>${c.counts.improved}</b> · Regressed: <b>${c.counts.regressed}</b> · Unchanged: ${c.counts.unchanged}</p>
+      <table><tr><th>Category</th><th>Mean A</th><th>Mean B</th><th>Δ</th></tr>${rows}</table>
+      ${items(c.regressed, "Regressions — read these before releasing")}${items(c.improved, "Improvements")}</div>`;
+  } catch (e) { $("cmpResult").innerHTML = `<p class='error'>${esc(e.message)}</p>`; }
+});
+
+$("queueBtn").addEventListener("click", async () => {
+  const runId = $("reviewRun").value;
+  if (!runId) { $("queueList").innerHTML = "<p class='error'>No run selected.</p>"; return; }
+  const { queue, stats } = await api("/api/review/queue?run_id=" + runId);
+  $("queueList").innerHTML = `<p class='muted'>${queue.length} item(s) awaiting review · ${stats.flagged_reviewed} of ${stats.flagged} flagged reviewed · ${stats.overturned} overturned.</p>` +
+    (queue.length ? queue.map(r => `<div class='card'><b>${esc(r.item_id)}</b> (${esc(r.category)}) — mean ${r.mean_score.toFixed(2)}
+      <p><b>Q:</b> ${esc(r.question)}</p><p><b>Response:</b> ${esc(r.response)}</p>
+      ${metricRows(r.metrics)}<p class='muted'>Flags: ${esc(r.flag_reasons.join("; "))}</p>
+      <div class='row'><div><label>Reviewer</label><input type='text' id='rev-${r.id}' placeholder='Your name'></div>
+      <div><label>Judgement</label><select id='jud-${r.id}'><option value='agree'>Agree — automated score stands</option><option value='disagree'>Disagree — score is wrong</option></select></div></div>
+      <div class='row'><div><label>Corrected score (1–5, required when disagreeing)</label><input type='number' id='cor-${r.id}' min='1' max='5' step='0.5'></div>
+      <div><label>Note</label><input type='text' id='note-${r.id}' placeholder='Why?'></div></div>
+      <button data-judge='${r.id}'>Record judgement</button> <span id='msg-${r.id}'></span></div>`).join("") : "<p class='muted'>Queue is clear — nothing flagged awaits review.</p>");
+  document.querySelectorAll("[data-judge]").forEach(btn => btn.addEventListener("click", async () => {
+    const id = btn.dataset.judge;
+    const body = {
+      reviewer: $("rev-" + id).value,
+      judgement: $("jud-" + id).value,
+      corrected_score: $("cor-" + id).value ? parseFloat($("cor-" + id).value) : null,
+      note: $("note-" + id).value,
+    };
+    try {
+      await api("/api/review/" + id, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      $("msg-" + id).innerHTML = "<span class='ok'>Judgement recorded.</span>";
+      btn.disabled = true;
+    } catch (e) { $("msg-" + id).innerHTML = `<span class='error'>${esc(e.message)}</span>`; }
+  }));
+});
+
+refreshDatasets();
+refreshRuns();
+</script>
+</body>
+</html>
