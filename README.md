@@ -229,6 +229,27 @@ method — and register it in `build_provider`. The runner, scorer, store and
 reporting never see provider internals, so nothing else changes. Never put
 an API key in source code, in a dataset, or in a test.
 
+### Gemini (live)
+
+The `gemini` provider talks to Google Gemini through its
+OpenAI-compatible chat-completions endpoint. Unlike `openai`, which
+appends `/chat/completions` to a base URL, `gemini` takes the full
+endpoint URL and posts to it verbatim:
+
+```bash
+export NORTHSTAR_GEMINI_API_KEY=<redacted>   # from the environment only; never commit it
+export NORTHSTAR_GEMINI_ENDPOINT="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+export NORTHSTAR_GEMINI_MODEL="gemini-3.5-flash-lite"
+.venv/bin/nev run data/sample_dataset.jsonl --provider gemini --prompt-version v2 --db northstar.db
+```
+
+The default model is `gemini-3.5-flash-lite` (Google no longer offers
+`gemini-2.5-flash` to new API keys). The free tier is rate limited
+(about 10 requests a minute), so pace a full-dataset live run at
+about one call every 6–7 seconds. A live run over the sample dataset
+is recorded separately from the mock runs in
+[docs/LIVE_RUN.md](docs/LIVE_RUN.md).
+
 ## How to add a metric
 
 Metrics live in `src/northstar_eval/metrics.py` and are registered in a

@@ -41,6 +41,48 @@ def test_runs_are_deterministic(tmp_db):
     assert first.dataset_hash == second.dataset_hash
 
 
+def test_gemini_run_uses_env_config_and_records_provider(tmp_db, monkeypatch):
+    """A gemini run reads its key/endpoint/model from the environment."""
+    import json
+
+    monkeypatch.setenv("NORTHSTAR_GEMINI_API_KEY", "env-key")
+    monkeypatch.delenv("NORTHSTAR_GEMINI_ENDPOINT", raising=False)
+    monkeypatch.delenv("NORTHSTAR_GEMINI_MODEL", raising=False)
+
+    seen: dict = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": (
+                "You have 30 days from delivery to return an item. [DOC-RETURNS]"
+            )}}]}).encode()
+
+    def capture(request, timeout=None):
+        seen["url"] = request.full_url
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", capture)
+    summary = run_evaluation(RunConfig(
+        dataset_path=SAMPLE_DATASET, provider_name="gemini", db_path=tmp_db,
+    ))
+    assert summary.provider == "gemini"
+    assert summary.model == "gemini-3.5-flash-lite"
+    assert summary.n_items == 28
+    assert seen["url"] == (
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    )
+    with Store(tmp_db) as store:
+        run = store.get_run(summary.run_id)
+    assert run.provider == "gemini"
+    assert run.model == "gemini-3.5-flash-lite"
+
+
 def test_manifest_records_reproducibility(tmp_db, mock_a_run):
     with Store(tmp_db) as store:
         run = store.get_run(mock_a_run)

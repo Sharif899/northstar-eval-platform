@@ -9,7 +9,8 @@ Commands:
     nev serve                    Start the web UI.
 
 Every command accepts --help. API keys are read from the
-environment (NORTHSTAR_LLM_API_KEY) and never appear in output.
+environment (NORTHSTAR_LLM_API_KEY for ``openai``,
+NORTHSTAR_GEMINI_API_KEY for ``gemini``) and never appear in output.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from . import __version__
 from .compare import compare_runs
 from .dataset import dataset_summary, load_dataset, load_knowledge_base
 from .errors import DatasetError, NorthstarError, ProviderError, ReviewError
-from .providers import ALL_PROVIDERS, ProviderConfig
+from .providers import ALL_PROVIDERS, GEMINI_DEFAULT_MODEL, ProviderConfig
 from .report import build_json_report, build_markdown_report
 from .review import get_review_queue, record_judgement
 from .runner import RunConfig, run_evaluation
@@ -84,16 +85,30 @@ def cmd_load(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     dataset_path = Path(args.dataset)
+    if args.provider == "gemini":
+        api_key = os.environ.get("NORTHSTAR_GEMINI_API_KEY", "")
+        endpoint_url = os.environ.get("NORTHSTAR_GEMINI_ENDPOINT", "")
+        model = (
+            args.model
+            or os.environ.get("NORTHSTAR_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+        )
+        base_url = ""
+    else:
+        api_key = os.environ.get("NORTHSTAR_LLM_API_KEY", "")
+        endpoint_url = ""
+        model = args.model or args.provider
+        base_url = os.environ.get("NORTHSTAR_LLM_BASE_URL", "")
     config = RunConfig(
         dataset_path=dataset_path,
         kb_path=_kb_path_for(dataset_path, args.kb),
         provider_name=args.provider,
-        model=args.model or args.provider,
+        model=model,
         prompt_version=args.prompt_version,
         db_path=args.db,
         run_name=args.name or "",
-        base_url=os.environ.get("NORTHSTAR_LLM_BASE_URL", ""),
-        api_key=os.environ.get("NORTHSTAR_LLM_API_KEY", ""),
+        base_url=base_url,
+        api_key=api_key,
+        endpoint_url=endpoint_url,
     )
     summary = run_evaluation(config)
     _print_summary_table(f"Run complete: {summary.run_id}", [

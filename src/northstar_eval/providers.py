@@ -14,6 +14,11 @@ Two providers ship:
   stdlib ``urllib`` (no hard HTTP dependency in the core). The API
   key comes from the environment only (``NORTHSTAR_LLM_API_KEY``),
   never from source code.
+- ``gemini``: Google Gemini through its OpenAI-compatible endpoint.
+  Unlike ``openai`` it takes the FULL endpoint URL (including
+  ``/chat/completions``) and posts to it verbatim, nothing appended.
+  The API key comes from the environment only
+  (``NORTHSTAR_GEMINI_API_KEY``), never from source code.
 
 Prompt versions are real: v1 asks for a concise sourced answer;
 v2 adds an explicit instruction to cite every factual claim and to
@@ -38,8 +43,16 @@ from .errors import ProviderError
 log = logging.getLogger(__name__)
 
 MOCK_PROVIDERS = ("mock-a", "mock-b")
-REAL_PROVIDERS = ("openai",)
+REAL_PROVIDERS = ("openai", "gemini")
 ALL_PROVIDERS = MOCK_PROVIDERS + REAL_PROVIDERS
+
+# Gemini defaults. gemini-2.5-flash is no longer offered to new API
+# keys (Google returns 404); gemini-3.5-flash-lite is the current
+# small model that answers on the free tier.
+GEMINI_DEFAULT_MODEL = "gemini-3.5-flash-lite"
+GEMINI_DEFAULT_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+)
 
 PROMPT_VERSIONS = ("v1", "v2")
 
@@ -69,6 +82,9 @@ class ProviderConfig:
     model: str = "mock-a"
     prompt_version: str = "v2"
     base_url: str = ""
+    # Full request URL for providers that take one (Gemini). When set,
+    # it is used verbatim and no path is appended; see GeminiProvider.
+    endpoint_url: str = ""
     api_key: str = ""  # Filled from the environment, never hard-coded.
     timeout_seconds: float = 30.0
 
@@ -77,9 +93,26 @@ class ProviderConfig:
         """Build a config from the environment.
 
         ``NORTHSTAR_LLM_API_KEY`` and ``NORTHSTAR_LLM_BASE_URL`` are
-        read here and nowhere else, so a key can never leak into a
-        log line, a report or a test fixture by accident.
+        read here (for ``openai``); ``NORTHSTAR_GEMINI_API_KEY``,
+        ``NORTHSTAR_GEMINI_ENDPOINT`` and ``NORTHSTAR_GEMINI_MODEL``
+        are read here (for ``gemini``) — and nowhere else, so a key
+        can never leak into a log line, a report or a test fixture
+        by accident.
         """
+        if name == "gemini":
+            return cls(
+                name=name,
+                model=(
+                    model
+                    if model and model != "gemini"
+                    else os.environ.get("NORTHSTAR_GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+                ),
+                prompt_version=prompt_version,
+                endpoint_url=os.environ.get(
+                    "NORTHSTAR_GEMINI_ENDPOINT", GEMINI_DEFAULT_ENDPOINT
+                ),
+                api_key=os.environ.get("NORTHSTAR_GEMINI_API_KEY", ""),
+            )
         return cls(
             name=name,
             model=model or name,
@@ -299,6 +332,9 @@ class OpenAICompatibleProvider:
         self.model = config.model
         self.prompt_version = config.prompt_version
 
+    def _request_url(self) -> str:
+        return f"{self.config.base_url}/chat/completions"
+
     def _messages(self, item: EvalItem, docs: dict[str, SourceDoc]) -> list[dict]:
         sources = "\n\n".join(
             f"[{doc_id}] {docs[doc_id].title}: {docs[doc_id].text}"
@@ -322,7 +358,7 @@ class OpenAICompatibleProvider:
             }
         ).encode("utf-8")
         request = urllib.request.Request(
-            f"{self.config.base_url}/chat/completions",
+            self._request_url(),
             data=payload,
             headers={
                 "Content-Type": "application/json",
@@ -354,6 +390,44 @@ class OpenAICompatibleProvider:
             ) from exc
 
 
+class GeminiProvider(OpenAICompatibleProvider):
+    """Google Gemini via its OpenAI-compatible chat-completions endpoint.
+
+    Same request shape as ``openai`` (system + user messages,
+    temperature 0, stdlib ``urllib``), but the endpoint is the FULL
+    URL — including ``/chat/completions`` — and it is posted to
+    verbatim: no path is appended. The default endpoint is the
+    Gemini OpenAI-compatible endpoint; the default model is
+    ``gemini-3.5-flash-lite`` (``gemini-2.5-flash`` is no longer
+    offered to new API keys). Configuration comes from the
+    environment only: ``NORTHSTAR_GEMINI_ENDPOINT``,
+    ``NORTHSTAR_GEMINI_API_KEY`` and ``NORTHSTAR_GEMINI_MODEL``.
+    """
+
+    name = "gemini"
+
+    def __init__(self, config: ProviderConfig) -> None:
+        if not config.api_key:
+            raise ProviderError(
+                "No API key: set NORTHSTAR_GEMINI_API_KEY in the environment. "
+                "The key is never stored in source code or in run reports."
+            )
+        if not config.endpoint_url:
+            raise ProviderError(
+                "No endpoint: set NORTHSTAR_GEMINI_ENDPOINT, e.g. "
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions."
+            )
+        if config.prompt_version not in PROMPT_VERSIONS:
+            raise ProviderError(f"Unknown prompt version {config.prompt_version!r}; use v1 or v2.")
+        self.config = config
+        self.model = config.model
+        self.prompt_version = config.prompt_version
+
+    def _request_url(self) -> str:
+        # Full URL, used verbatim — never append a path.
+        return self.config.endpoint_url
+
+
 def build_provider(name: str, config: ProviderConfig | None = None) -> LLMProvider:
     """Build a provider by name. Unknown names fail with the list."""
     if name == "mock-a":
@@ -363,6 +437,9 @@ def build_provider(name: str, config: ProviderConfig | None = None) -> LLMProvid
     if name == "openai":
         cfg = config or ProviderConfig.from_env("openai")
         return OpenAICompatibleProvider(cfg)
+    if name == "gemini":
+        cfg = config or ProviderConfig.from_env("gemini")
+        return GeminiProvider(cfg)
     raise ProviderError(
         f"Unknown provider {name!r}; available providers: {', '.join(ALL_PROVIDERS)}."
     )

@@ -20,7 +20,7 @@ from pathlib import Path
 from .dataset import dataset_hash, dataset_summary, load_dataset, load_knowledge_base
 from .errors import ProviderError
 from .metrics import METRIC_NAMES
-from .providers import ProviderConfig, build_provider
+from .providers import REAL_PROVIDERS, ProviderConfig, build_provider
 from .scorer import PASS_THRESHOLD, SCORER_VERSION, ItemScore, score_response
 from .store import RunRecord, Store
 
@@ -45,6 +45,9 @@ class RunConfig:
     run_name: str = ""
     base_url: str = ""
     api_key: str = ""
+    # Full request URL for providers that take one (Gemini). When
+    # set, it is used verbatim; see providers.GeminiProvider.
+    endpoint_url: str = ""
 
 
 @dataclass
@@ -70,6 +73,36 @@ def _default_kb_path(dataset_path: Path) -> Path:
     return dataset_path.parent / "knowledge_base.json"
 
 
+def _provider_config(config: RunConfig) -> ProviderConfig:
+    """Resolve the run's provider config.
+
+    Real providers read their credentials from the environment when
+    the run config does not supply them, so the CLI, the web UI and
+    direct callers all behave the same way. A value supplied in the
+    run config wins over the environment.
+    """
+    if config.provider_name in REAL_PROVIDERS:
+        cfg = ProviderConfig.from_env(
+            config.provider_name,
+            model=config.model,
+            prompt_version=config.prompt_version,
+        )
+        if config.api_key:
+            cfg.api_key = config.api_key
+        if config.base_url:
+            cfg.base_url = config.base_url
+        if config.endpoint_url:
+            cfg.endpoint_url = config.endpoint_url
+        return cfg
+    return ProviderConfig(
+        name=config.provider_name,
+        model=config.model or config.provider_name,
+        prompt_version=config.prompt_version,
+        base_url=config.base_url,
+        api_key=config.api_key,
+    )
+
+
 def run_evaluation(config: RunConfig) -> RunSummary:
     """Load the dataset, run it through the provider, score, persist."""
     dataset_path = Path(config.dataset_path)
@@ -82,13 +115,7 @@ def run_evaluation(config: RunConfig) -> RunSummary:
             f"Dataset references knowledge-base documents that do not exist: "
             f"{', '.join(missing_docs)}. Check {kb_path}."
         )
-    provider_config = ProviderConfig(
-        name=config.provider_name,
-        model=config.model or config.provider_name,
-        prompt_version=config.prompt_version,
-        base_url=config.base_url,
-        api_key=config.api_key,
-    )
+    provider_config = _provider_config(config)
     provider = build_provider(config.provider_name, provider_config)
     log.info(
         "Starting run: dataset=%s (%d items), provider=%s, model=%s, prompt=%s",

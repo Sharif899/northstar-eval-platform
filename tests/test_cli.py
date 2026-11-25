@@ -45,6 +45,13 @@ def test_cli_run_unknown_provider_returns_one(tmp_path):
     assert exc.value.code == 2
 
 
+def test_cli_run_gemini_without_key_returns_one(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("NORTHSTAR_GEMINI_API_KEY", raising=False)
+    assert main(["run", str(SAMPLE_DATASET), "--provider", "gemini",
+                 "--db", str(tmp_path / "x.db")]) == 1
+    assert "NORTHSTAR_GEMINI_API_KEY" in capsys.readouterr().err
+
+
 def test_cli_compare_and_report(tmp_path, capsys):
     db = tmp_path / "cli.db"
     main(["run", str(SAMPLE_DATASET), "--provider", "mock-a", "--db", str(db)])

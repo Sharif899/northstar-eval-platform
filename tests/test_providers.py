@@ -9,7 +9,11 @@ import pytest
 from northstar_eval.dataset import load_dataset_jsonl
 from northstar_eval.errors import ProviderError
 from northstar_eval.providers import (
+    ALL_PROVIDERS,
     MOCK_B_CITES,
+    MOCK_PROVIDERS,
+    REAL_PROVIDERS,
+    GeminiProvider,
     OpenAICompatibleProvider,
     ProviderConfig,
     build_provider,
@@ -162,3 +166,76 @@ def test_config_from_env_reads_key_and_url(monkeypatch):
     config = ProviderConfig.from_env("openai")
     assert config.api_key == "env-key"
     assert config.base_url == "https://api.example.com/v1"
+
+
+GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+
+def test_gemini_provider_uses_full_endpoint_url_verbatim(monkeypatch, item_straight, kb):
+    """The full endpoint URL is posted to as-is; no path is appended."""
+    seen: dict = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "Hello."}}]}).encode()
+
+    def capture(request, timeout=None):
+        seen["url"] = request.full_url
+        seen["model"] = json.loads(request.data.decode())["model"]
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", capture)
+    provider = GeminiProvider(ProviderConfig(
+        name="gemini", model="gemini-3.5-flash-lite",
+        endpoint_url=GEMINI_ENDPOINT, api_key="test-key",
+    ))
+    assert provider.generate(item_straight, kb) == "Hello."
+    assert seen["url"] == GEMINI_ENDPOINT
+    assert not seen["url"].endswith("/chat/completions/chat/completions")
+    assert seen["model"] == "gemini-3.5-flash-lite"
+
+
+def test_gemini_provider_needs_key_and_endpoint():
+    with pytest.raises(ProviderError, match="NORTHSTAR_GEMINI_API_KEY"):
+        GeminiProvider(ProviderConfig(name="gemini", endpoint_url=GEMINI_ENDPOINT))
+    with pytest.raises(ProviderError, match="NORTHSTAR_GEMINI_ENDPOINT"):
+        GeminiProvider(ProviderConfig(name="gemini", api_key="key"))
+
+
+def test_gemini_config_from_env_defaults(monkeypatch):
+    monkeypatch.delenv("NORTHSTAR_GEMINI_MODEL", raising=False)
+    monkeypatch.delenv("NORTHSTAR_GEMINI_ENDPOINT", raising=False)
+    monkeypatch.setenv("NORTHSTAR_GEMINI_API_KEY", "env-key")
+    config = ProviderConfig.from_env("gemini")
+    assert config.api_key == "env-key"
+    assert config.endpoint_url == GEMINI_ENDPOINT
+    assert config.model == "gemini-3.5-flash-lite"
+
+
+def test_gemini_config_from_env_respects_overrides(monkeypatch):
+    monkeypatch.setenv("NORTHSTAR_GEMINI_API_KEY", "env-key")
+    monkeypatch.setenv("NORTHSTAR_GEMINI_ENDPOINT", "https://example.invalid/chat/completions")
+    monkeypatch.setenv("NORTHSTAR_GEMINI_MODEL", "gemini-3.8-flash")
+    config = ProviderConfig.from_env("gemini")
+    assert config.endpoint_url == "https://example.invalid/chat/completions"
+    assert config.model == "gemini-3.8-flash"
+
+
+def test_build_provider_gemini_uses_env(monkeypatch):
+    monkeypatch.setenv("NORTHSTAR_GEMINI_API_KEY", "env-key")
+    provider = build_provider("gemini")
+    assert provider.name == "gemini"
+    assert provider.model == "gemini-3.5-flash-lite"
+    assert isinstance(provider, GeminiProvider)
+
+
+def test_gemini_provider_in_provider_lists():
+    assert "gemini" in ALL_PROVIDERS
+    assert "gemini" in REAL_PROVIDERS
+    assert "gemini" not in MOCK_PROVIDERS
